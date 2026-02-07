@@ -1,0 +1,370 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  fullName     String    @map("full_name")
+  role         String // admin, warehouse_staff, billing_staff, project_manager
+  phone        String?
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  lastLogin    DateTime? @map("last_login")
+
+  // Relations
+  managedProjects       Project[]        @relation("ProjectManager")
+  createdPurchaseOrders PurchaseOrder[]  @relation("POCreator")
+  createdGatePasses     GatePass[]       @relation("GatePassCreator")
+  stockMovements        StockMovement[]  @relation("MovementPerformer")
+  auditLogs             AuditLog[]
+  permissions           UserPermission[]
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+model UserPermission {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  resource  String // inventory, projects, gatepass, purchase_orders, suppliers, users, analytics, settings
+  canView   Boolean  @default(false) @map("can_view")
+  canCreate Boolean  @default(false) @map("can_create")
+  canEdit   Boolean  @default(false) @map("can_edit")
+  canDelete Boolean  @default(false) @map("can_delete")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, resource])
+  @@index([userId])
+  @@map("user_permissions")
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  parentId    String?  @map("parent_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  parent     Category?   @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children   Category[]  @relation("CategoryHierarchy")
+  items      Item[]
+  attributes Attribute[]
+
+  @@index([parentId])
+  @@map("categories")
+}
+
+// EAV Model: Attributes define dynamic fields per category
+model Attribute {
+  id                   String   @id @default(uuid())
+  categoryId           String   @map("category_id")
+  name                 String
+  label                String
+  inputType            String   @map("input_type") // text, number, dropdown, checkbox, file, date, email, url, textarea
+  required             Boolean  @default(false)
+  options              String? // JSON array for dropdown/checkbox: ["Option1","Option2"]
+  validationRules      String?  @map("validation_rules") // JSON object: {"min":0,"max":100}
+  helpText             String?  @map("help_text")
+  displayOrder         Int      @default(0) @map("display_order")
+  conditionalAppearance String? @map("conditional_appearance") // JSON: {"dependsOn":"material_type","showForValues":["MS","SS"]}
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  category Category             @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  values   ItemAttributeValue[]
+
+  @@unique([categoryId, name])
+  @@index([categoryId])
+  @@map("attributes")
+}
+
+// EAV Model: Stores actual attribute values for items
+model ItemAttributeValue {
+  id          String   @id @default(uuid())
+  itemId      String   @map("item_id")
+  attributeId String   @map("attribute_id")
+  value       String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, attributeId])
+  @@index([itemId])
+  @@index([attributeId])
+  @@map("item_attribute_values")
+}
+
+model Item {
+  id                String   @id @default(uuid())
+  barcode           String   @unique
+  name              String
+  description       String?
+  categoryId        String?  @map("category_id")
+  brand             String?
+  unitOfMeasurement String   @map("unit_of_measurement")
+  currentQuantity   Decimal  @default(0) @map("current_quantity")
+  minStockLevel     Decimal  @default(0) @map("min_stock_level")
+  maxStockLevel     Decimal? @map("max_stock_level")
+  reorderLevel      Decimal  @default(0) @map("reorder_level")
+  reorderQuantity   Decimal  @default(0) @map("reorder_quantity")
+  unitCost          Decimal? @map("unit_cost")
+  sellingPrice      Decimal? @map("selling_price")
+  location          String?
+  imageUrl          String?  @map("image_url")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  category           Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  attributeValues    ItemAttributeValue[]
+  stockMovements     StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+  gatePassItems      GatePassItem[]
+
+  @@index([barcode])
+  @@index([categoryId])
+  @@index([name])
+  @@map("items")
+}
+
+model Project {
+  id               String    @id @default(uuid())
+  projectCode      String    @unique @map("project_code")
+  name             String
+  description      String?
+  siteAddress      String    @map("site_address")
+  projectManagerId String?   @map("project_manager_id")
+  startDate        DateTime? @map("start_date")
+  endDate          DateTime? @map("end_date")
+  budget           Decimal?
+  status           String    @default("active") // active, completed, on_hold, cancelled
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  projectManager User?           @relation("ProjectManager", fields: [projectManagerId], references: [id])
+  stockMovements StockMovement[]
+  gatePasses     GatePass[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([projectCode])
+  @@index([projectManagerId])
+  @@map("projects")
+}
+
+// Requirement model removed for single-location inventory system
+// Previously tracked multi-location requirements and transfers
+// model Requirement {
+//   id               String    @id @default(uuid())
+//   projectId        String    @map("project_id")
+//   itemId           String    @map("item_id")
+//   quantity         Decimal
+//   priority         String    @default("normal") // normal, urgent
+//   status           String    @default("pending") // pending, approved, billed, fulfilled
+//   reason           String?
+//   requestedBy      String    @map("requested_by")
+//   weekNumber       Int?      @map("week_number") // Week number of the year
+//   year             Int?
+//   billedAt         DateTime? @map("billed_at")
+//   billingId        String?   @map("billing_id")
+//   createdAt        DateTime  @default(now()) @map("created_at")
+//   updatedAt        DateTime  @updatedAt @map("updated_at")
+//
+//   // Relations
+//   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+//   item      Item     @relation(fields: [itemId], references: [id])
+//   requester User     @relation("RequirementRequester", fields: [requestedBy], references: [id])
+//   billing   Billing? @relation(fields: [billingId], references: [id])
+//
+//   @@index([projectId])
+//   @@index([itemId])
+//   @@index([requestedBy])
+//   @@index([status])
+//   @@index([weekNumber, year])
+//   @@index([billingId])
+//   @@map("requirements")
+// }
+
+model Supplier {
+  id            String   @id @default(uuid())
+  supplierCode  String   @unique @map("supplier_code")
+  name          String
+  contactPerson String?  @map("contact_person")
+  email         String?
+  phone         String?
+  address       String?
+  paymentTerms  String?  @map("payment_terms")
+  taxId         String?  @map("tax_id")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  purchaseOrders PurchaseOrder[]
+
+  @@index([supplierCode])
+  @@index([name])
+  @@map("suppliers")
+}
+
+model PurchaseOrder {
+  id                   String    @id @default(uuid())
+  poNumber             String    @unique @map("po_number")
+  supplierId           String?   @map("supplier_id")
+  projectId            String?   @map("project_id")
+  orderDate            DateTime  @map("order_date")
+  expectedDeliveryDate DateTime? @map("expected_delivery_date")
+  actualDeliveryDate   DateTime? @map("actual_delivery_date")
+  status               String    @default("pending") // pending, approved, received, partial, cancelled
+  totalAmount          Decimal?  @map("total_amount")
+  taxAmount            Decimal?  @map("tax_amount")
+  notes                String?
+  createdBy            String    @map("created_by")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  supplier Supplier?           @relation(fields: [supplierId], references: [id])
+  project  Project?            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator  User                @relation("POCreator", fields: [createdBy], references: [id])
+  items    PurchaseOrderItem[]
+
+  @@index([poNumber])
+  @@index([supplierId])
+  @@index([projectId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id               String   @id @default(uuid())
+  purchaseOrderId  String   @map("purchase_order_id")
+  itemId           String   @map("item_id")
+  quantity         Decimal
+  unitPrice        Decimal  @map("unit_price")
+  totalPrice       Decimal  @map("total_price")
+  receivedQuantity Decimal  @default(0) @map("received_quantity")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  // Relations
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  item          Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+  @@index([itemId])
+  @@map("purchase_order_items")
+}
+
+model StockMovement {
+  id            String   @id @default(uuid())
+  itemId        String   @map("item_id")
+  movementType  String   @map("movement_type") // stock_in, stock_out, adjustment, transfer
+  quantity      Decimal
+  unitCost      Decimal? @map("unit_cost")
+  referenceType String?  @map("reference_type")
+  referenceId   String?  @map("reference_id")
+  projectId     String?  @map("project_id")
+  locationFrom  String?  @map("location_from")
+  locationTo    String?  @map("location_to")
+  notes         String?
+  performedBy   String   @map("performed_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  performer User     @relation("MovementPerformer", fields: [performedBy], references: [id])
+
+  @@index([itemId])
+  @@index([projectId])
+  @@index([movementType])
+  @@index([createdAt])
+  @@map("stock_movements")
+}
+
+model GatePass {
+  id               String    @id @default(uuid())
+  gatePassNumber   String    @unique @map("gatepass_number")
+  projectId        String?   @map("project_id")
+  gatePassDate     DateTime  @map("gatepass_date")
+  dueDate          DateTime? @map("due_date")
+  subtotal         Decimal
+  taxAmount        Decimal   @default(0) @map("tax_amount")
+  discountAmount   Decimal   @default(0) @map("discount_amount")
+  totalAmount      Decimal   @map("total_amount")
+  status           String    @default("pending") // pending, paid, partial, overdue, cancelled, issued
+  paymentDate      DateTime? @map("payment_date")
+  notes            String?
+  createdBy        String    @map("created_by")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  project Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator User           @relation("GatePassCreator", fields: [createdBy], references: [id])
+  items   GatePassItem[]
+
+  @@index([gatePassNumber])
+  @@index([projectId])
+  @@index([gatePassDate])
+  @@map("gatepass")
+}
+
+model GatePassItem {
+  id           String   @id @default(uuid())
+  gatePassId   String   @map("gatepass_id")
+  itemId       String   @map("item_id")
+  quantity     Decimal
+  unitPrice    Decimal  @map("unit_price")
+  size         String?
+  totalPrice   Decimal  @map("total_price")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  gatePass GatePass @relation(fields: [gatePassId], references: [id], onDelete: Cascade)
+  item     Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([gatePassId])
+  @@index([itemId])
+  @@map("gatepass_items")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  oldValues  String?  @map("old_values") // JSON stored as String for SQLite
+  newValues  String?  @map("new_values") // JSON stored as String for SQLite
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

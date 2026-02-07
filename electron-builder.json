@@ -1,0 +1,106 @@
+{
+  "appId": "com.stockyard.app",
+  "productName": "StockYard",
+  "copyright": "Copyright © 2026 StockYard",
+  "directories": {
+    "output": "dist",
+    "buildResources": "build"
+  },
+  "files": [
+    "electron-main.js",
+    "electron-preload.js",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "frontend/.next",
+      "to": "frontend/.next"
+    },
+    {
+      "from": "frontend/public",
+      "to": "frontend/public"
+    },
+    {
+      "from": "frontend/node_modules",
+      "to": "frontend/node_modules"
+    },
+    {
+      "from": "frontend/package.json",
+      "to": "frontend/package.json"
+    },
+    {
+      "from": "frontend/next.config.js",
+      "to": "frontend/next.config.js"
+    },
+    {
+      "from": "backend/dist",
+      "to": "backend/dist"
+    },
+    {
+      "from": "backend/node_modules",
+      "to": "backend/node_modules"
+    },
+    {
+      "from": "backend/prisma",
+      "to": "backend/prisma"
+    },
+    {
+      "from": "backend/package.json",
+      "to": "backend/package.json"
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "sign": null,
+    "icon": "build/icon.ico",
+    "artifactName": "${productName}-${version}-Setup.${ext}",
+    "requestedExecutionLevel": "asInvoker",
+    "publisherName": "StockYard Systems"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "StockYard",
+    "menuCategory": true,
+    "installerIcon": "build/installer_icon.ico",
+    "uninstallerIcon": "build/installer_icon.ico",
+    "warningsAsErrors": false,
+    "differentialPackage": false
+  },
+  "portable": {
+    "artifactName": "${productName}-${version}-Portable.${ext}"
+  },
+  "mac": {
+    "target": ["dmg", "zip"],
+    "icon": "build/icon.icns",
+    "category": "public.app-category.business",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist"
+  },
+  "linux": {
+    "target": ["AppImage", "deb"],
+    "icon": "build/icons",
+    "category": "Office",
+    "maintainer": "inventory@example.com"
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "your-org",
+    "repo": "inventory-management"
+  }
+}

@@ -1,0 +1,98 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+backend/node_modules/
+frontend/node_modules/
+
+# Testing
+coverage/
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# Backend
+backend/dist/
+backend/build/
+
+# Production
+dist/
+
+# Electron builds
+win-unpacked/
+mac/
+linux-unpacked/
+*.exe
+*.dmg
+*.AppImage
+*.deb
+
+# Database
+*.db
+*.db-journal
+database.db
+backend/database.db
+backend/prisma/*.db
+backend/prisma/dev.db*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.desktop
+*.env
+backend/.env
+backend/.env.desktop
+frontend/.env.local
+
+# Logs
+logs/
+backend/logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build files (keep source icons in build/)
+build/*.ico
+build/*.icns
+
+# User data
+data/
+user-data/
+Gate Passes/
+
+# Backups
+*.backup
+*.bak
+backend/backups/*.db*
+
+# Temporary/Test files
+*.jpeg
+*.jpg
+*.pdf
+Task*.png
+Err*.png
+image.png
+installer_icon_image.png
+
+# Misc
+*.pem
+.vercel
