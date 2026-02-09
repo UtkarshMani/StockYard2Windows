@@ -1,20 +1,58 @@
 import winston from 'winston';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 
-// Use LOG_PATH environment variable for log directory, or default to ./logs
-const logDir = process.env.LOG_PATH || 'logs';
+// Use LOG_PATH environment variable, or fallback to writable locations
+function getLogDir(): string {
+  if (process.env.LOG_PATH) return process.env.LOG_PATH;
+  
+  // In production/embedded mode, use a writable user directory
+  if (process.env.EMBEDDED_MODE === 'true' || process.env.NODE_ENV === 'production') {
+    return path.join(os.homedir(), '.local', 'share', 'inventory-management-system', 'logs');
+  }
+  
+  return 'logs';
+}
+
+const logDir = getLogDir();
+let logDirWritable = false;
 
 // Ensure log directory exists
-if (!fs.existsSync(logDir)) {
-  try {
+try {
+  if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true });
-  } catch (error) {
-    // If we can't create the log directory, Winston will fail anyway
-    // But at least we tried
-    console.error('Failed to create log directory:', error);
   }
+  logDirWritable = true;
+} catch (error) {
+  console.error('Failed to create log directory:', error);
 }
+
+// Build transports array - always include console for embedded mode
+const transports: winston.transport[] = [];
+
+// Add file transports only if log directory is writable
+if (logDirWritable) {
+  transports.push(
+    new winston.transports.File({ 
+      filename: path.join(logDir, 'error.log'), 
+      level: 'error' 
+    }),
+    new winston.transports.File({ 
+      filename: path.join(logDir, 'combined.log') 
+    }),
+  );
+}
+
+// Always add console transport (Electron captures stdout/stderr)
+transports.push(
+  new winston.transports.Console({
+    format: winston.format.combine(
+      winston.format.colorize(),
+      winston.format.simple()
+    ),
+  })
+);
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
@@ -25,27 +63,7 @@ const logger = winston.createLogger({
     winston.format.json()
   ),
   defaultMeta: { service: 'inventory-api' },
-  transports: [
-    new winston.transports.File({ 
-      filename: path.join(logDir, 'error.log'), 
-      level: 'error' 
-    }),
-    new winston.transports.File({ 
-      filename: path.join(logDir, 'combined.log') 
-    }),
-  ],
+  transports,
 });
-
-// Console logging in development
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      ),
-    })
-  );
-}
 
 export default logger;

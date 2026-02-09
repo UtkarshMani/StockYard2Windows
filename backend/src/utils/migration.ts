@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { getDataDirectory, getDatabasePath } from '../config/database';
@@ -93,15 +93,16 @@ async function setupProductionDatabase(dbPath: string): Promise<{ success: boole
     
     // Try to find a pre-built database in resources or create a new one using Prisma Client
     const isPackaged = process.env.EMBEDDED_MODE === 'true';
-    let resourcesPath: string;
-    
+    // Resolve backend directory (works in both Electron and standalone node)
+    let backendDir: string;
     if (isPackaged && (process as any).resourcesPath) {
-      resourcesPath = (process as any).resourcesPath;
+      backendDir = path.join((process as any).resourcesPath, 'backend');
     } else {
-      resourcesPath = path.join(__dirname, '..', '..');
+      // __dirname is backend/dist/utils/, so go up 2 levels to get backend/
+      backendDir = path.join(__dirname, '..', '..');
     }
-    
-    const seedDbPath = path.join(resourcesPath, 'app.asar.unpacked', 'backend', 'prisma', 'dev.db');
+
+    const seedDbPath = path.join(backendDir, 'prisma', 'dev.db');
     
     if (fs.existsSync(seedDbPath)) {
       // Copy pre-seeded database
@@ -117,15 +118,39 @@ async function setupProductionDatabase(dbPath: string): Promise<{ success: boole
       
       // Push schema to create tables in production
       logger.info('📋 Pushing database schema...');
-      const backendDir = isPackaged 
-        ? path.join(resourcesPath, 'backend')
-        : path.join(__dirname, '..', '..');
       
-      execSync('npx prisma db push --accept-data-loss --skip-generate', {
-        cwd: backendDir,
-        env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
-        stdio: 'pipe' // Capture output to prevent terminal spam
-      });
+      // Find node executable for spawning prisma CLI
+      const nodeExecutable = process.argv[0] || 'node';
+
+      // Use spawnSync with explicit node and prisma paths to avoid shell issues
+      const prismaCliJs = path.join(backendDir, 'node_modules', 'prisma', 'build', 'index.js');
+      let pushResult: ReturnType<typeof spawnSync>;
+      if (fs.existsSync(prismaCliJs)) {
+        logger.info(`Using Prisma CLI at: ${prismaCliJs}`);
+        pushResult = spawnSync(nodeExecutable, [prismaCliJs, 'db', 'push', '--accept-data-loss', '--skip-generate'], {
+          cwd: backendDir,
+          env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
+          stdio: 'pipe'
+        });
+      } else {
+        // Approach 2: Use npx with explicit shell
+        logger.info('Falling back to npx...');
+        const shell = fs.existsSync('/usr/bin/bash') ? '/usr/bin/bash' : 
+                       fs.existsSync('/bin/bash') ? '/bin/bash' :
+                       fs.existsSync('/usr/bin/sh') ? '/usr/bin/sh' : '/bin/sh';
+        pushResult = spawnSync(shell, ['-c', 'npx prisma db push --accept-data-loss --skip-generate'], {
+          cwd: backendDir,
+          env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
+          stdio: 'pipe'
+        });
+      }
+      
+      if (pushResult.status !== 0) {
+        const stderr = pushResult.stderr?.toString() || '';
+        const stdout = pushResult.stdout?.toString() || '';
+        logger.error(`Prisma db push failed (exit ${pushResult.status}): ${stderr} ${stdout}`);
+        throw new Error(`Prisma db push failed: ${stderr || stdout}`);
+      }
       
       logger.info('✅ Schema created successfully');
       
@@ -161,7 +186,7 @@ async function seedProductionDatabase(): Promise<void> {
     
     if (!adminExists) {
       // Create admin user
-      const bcrypt = require('bcryptjs');
+      const bcrypt = require('bcrypt');
       const hashedPassword = await bcrypt.hash('admin123', 10);
       
       await prisma.user.create({

@@ -7,9 +7,10 @@ const isDev = !app.isPackaged; // Detect if running in development or packaged
 
 let mainWindow;
 let backendProcess;
+let frontendProcess;
 const BACKEND_PORT = 5000;
 const FRONTEND_PORT = 3000;
-const USE_EXISTING_SERVERS = true; // Always use existing development servers
+const USE_EXISTING_SERVERS = isDev; // Dev: use existing servers, Production: start embedded
 
 // User data paths - Electron manages this location safely across updates
 const userDataPath = app.getPath('userData');
@@ -55,10 +56,10 @@ function startFrontend() {
       NEXT_PUBLIC_WS_URL: `http://localhost:${BACKEND_PORT}`
     };
 
-    const nodeExecutable = isDev ? 'node' : (process.platform === 'win32' ? process.execPath : 'node');
+    const nodeExecutable = findNodeExecutable();
     
     // Start Next.js production server
-    const frontendProcess = spawn(
+    frontendProcess = spawn(
       nodeExecutable,
       [path.join(frontendDir, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', FRONTEND_PORT.toString()],
       {
@@ -75,7 +76,8 @@ function startFrontend() {
       const output = data.toString();
       console.log('[Frontend]:', output);
       
-      if (output.includes('ready') || output.includes('started')) {
+      const outputLower = output.toLowerCase();
+      if (outputLower.includes('ready') || outputLower.includes('started') || outputLower.includes('listening')) {
         serverReady = true;
         clearTimeout(startupTimeout);
         resolve(frontendProcess);
@@ -291,12 +293,16 @@ function startBackend() {
  */
 function createWindow() {
   // Create browser window
+  const iconPath = isDev
+    ? path.join(__dirname, 'frontend', 'public', 'icon.png')
+    : path.join(process.resourcesPath, 'frontend', 'public', 'icon.png');
+  
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1024,
     minHeight: 768,
-    icon: path.join(__dirname, 'frontend', 'public', 'icon.png'),
+    icon: iconPath,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -316,10 +322,13 @@ function createWindow() {
   mainWindow.frontendUrl = `http://localhost:${FRONTEND_PORT}`;
   console.log('Frontend URL will be:', mainWindow.frontendUrl);
 
-  // Load frontend URL directly (no loading screen)
-  mainWindow.loadURL(mainWindow.frontendUrl).catch((error) => {
-    console.error('❌ Failed to load frontend:', error);
-  });
+  // In production, don't load URL yet — wait for servers to start
+  // In dev mode, servers are already running so load immediately
+  if (isDev) {
+    mainWindow.loadURL(mainWindow.frontendUrl).catch((error) => {
+      console.error('❌ Failed to load frontend:', error);
+    });
+  }
   
   // Handle load failures
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
@@ -429,8 +438,13 @@ app.whenReady().then(async () => {
         await startFrontend();
         console.log('✅ Frontend started successfully');
         
-        // Servers are ready - frontend URL already loaded in createWindow()
-        console.log('✅ All servers initialized');
+        // Servers are ready - NOW load the frontend URL
+        console.log('✅ All servers initialized, loading frontend...');
+        if (mainWindow) {
+          mainWindow.loadURL(mainWindow.frontendUrl).catch((err) => {
+            console.error('❌ Failed to load frontend after server start:', err);
+          });
+        }
       } catch (error) {
         console.error('❌ Backend startup failed:', error.message);
         // Show error in window instead of dialog
@@ -486,6 +500,11 @@ app.on('before-quit', () => {
   if (backendProcess) {
     console.log('Stopping backend process...');
     backendProcess.kill();
+  }
+  // Kill frontend process
+  if (frontendProcess) {
+    console.log('Stopping frontend process...');
+    frontendProcess.kill();
   }
 });
 
