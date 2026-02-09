@@ -181,17 +181,17 @@ async function seedProductionDatabase(): Promise<void> {
     
     // Check if admin user exists
     const adminExists = await prisma.user.findUnique({
-      where: { email: 'admin@build.com' }
+      where: { email: 'project@primeinfraa.com' }
     });
     
     if (!adminExists) {
       // Create admin user
       const bcrypt = require('bcrypt');
-      const hashedPassword = await bcrypt.hash('admin123', 10);
+      const hashedPassword = await bcrypt.hash('Xtrim@Q6', 10);
       
       await prisma.user.create({
         data: {
-          email: 'admin@build.com',
+          email: 'project@primeinfraa.com',
           passwordHash: hashedPassword,
           fullName: 'Administrator',
           role: 'admin',

@@ -56,10 +56,10 @@ async function main() {
 
     // Step 7: Create production admin user
     console.log('👤 Creating production admin user...');
-    const adminPasswordHash = await bcrypt.hash('admin123', 12);
+    const adminPasswordHash = await bcrypt.hash('Xtrim@Q6', 12);
     const admin = await newPrisma.user.create({
       data: {
-        email: 'admin@build.com',
+        email: 'project@primeinfraa.com',
         passwordHash: adminPasswordHash,
         fullName: 'System Administrator',
         role: 'admin',
@@ -94,8 +94,8 @@ async function main() {
     }
 
     console.log('✓ Admin user created:', admin.email);
-    console.log('  Email: admin@build.com');
-    console.log('  Password: admin123');
+    console.log('  Email: project@primeinfraa.com');
+    console.log('  Password: Xtrim@Q6');
     console.log('  ⚠️  IMPORTANT: Change this password after first login!\n');
 
     // Step 8: Create default categories

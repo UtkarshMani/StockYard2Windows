@@ -116,15 +116,6 @@ export default function LoginPage() {
               {isLoading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
-
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-center text-sm text-gray-600">
-              Demo Credentials:
-            </p>
-            <div className="mt-2 space-y-1 text-xs text-gray-500 text-center">
-              <p>Admin: admin@build.com / admin123</p>
-            </div>
-          </div>
         </div>
 
         <p className="mt-4 text-center text-sm text-gray-600">
