@@ -3,6 +3,10 @@ const path = require('path');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const http = require('http');
+
+// Disable sandbox globally — required for Electron on Linux without SUID helper
+app.commandLine.appendSwitch('no-sandbox');
+
 const isDev = !app.isPackaged; // Detect if running in development or packaged
 
 let mainWindow;

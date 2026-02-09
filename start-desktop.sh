@@ -101,4 +101,4 @@ fi
 # Using npx electron . ensures isDev=true and USE_EXISTING_SERVERS=true
 # so it connects to the dev servers we just started instead of spawning its own
 echo "Launching StockYard Electron app..."
-npx electron . --no-sandbox
+npx electron .

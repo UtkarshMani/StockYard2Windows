@@ -96,8 +96,7 @@
     "target": ["AppImage", "deb"],
     "icon": "build/icons",
     "category": "Office",
-    "maintainer": "inventory@example.com",
-    "executableArgs": ["--no-sandbox"]
+    "maintainer": "inventory@example.com"
   },
   "publish": {
     "provider": "github",
