@@ -262,10 +262,6 @@ export class ItemController {
         return item;
       });
 
-      // Emit real-time update
-      const io = req.app.get('io');
-      io.emit('item:created', result);
-
       res.status(201).json({
         status: 'success',
         message: 'Item created successfully',
@@ -389,10 +385,6 @@ export class ItemController {
 
         return item;
       });
-
-      // Emit real-time update
-      const io = req.app.get('io');
-      io.emit('item:updated', result);
 
       res.json({
         status: 'success',

@@ -4,10 +4,34 @@ const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 
-// Disable sandbox globally — required for Electron on Linux without SUID helper
+// ─── Chromium sandbox & GPU fixes ───────────────────────────────────────────
+// These MUST be set before app.whenReady() fires. The appendSwitch('no-sandbox')
+// alone is unreliable because Chromium's child-process launcher reads the real
+// argv before Electron's JS shim can inject flags. Adding the switches below
+// prevents the /dev/shm FATAL crash that kills the renderer/GPU processes.
 app.commandLine.appendSwitch('no-sandbox');
+app.commandLine.appendSwitch('disable-setuid-sandbox');
+app.commandLine.appendSwitch('disable-gpu-sandbox');
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-software-rasterizer');
+app.commandLine.appendSwitch('disable-dev-shm-usage');  // Use /tmp instead of /dev/shm
+app.commandLine.appendSwitch('no-zygote');               // Skip zygote (avoids shm crashes)
+app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor');
+app.disableHardwareAcceleration();  // Avoid GPU process entirely
 
 const isDev = !app.isPackaged; // Detect if running in development or packaged
+
+// ─── Single Instance Lock (production only) ─────────────────────────────────
+// Prevents the infinite-window-loop bug on Windows where spawning the backend
+// with process.execPath re-launches Electron instead of Node.js.
+// Only enforce in production — dev mode must allow running alongside installed app.
+if (!isDev) {
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    console.log('Another instance is already running. Exiting.');
+    app.exit(0);  // Hard exit — app.quit() is async and won't stop execution
+  }
+}
 
 let mainWindow;
 let backendProcess;
@@ -57,10 +81,14 @@ function startFrontend() {
       NODE_ENV: 'production',
       PORT: FRONTEND_PORT.toString(),
       NEXT_PUBLIC_API_URL: `http://localhost:${BACKEND_PORT}/api/v1`,
-      NEXT_PUBLIC_WS_URL: `http://localhost:${BACKEND_PORT}`
     };
 
     const nodeExecutable = findNodeExecutable();
+
+    // If the found node is actually Electron, tell it to behave as Node
+    if (nodeExecutable === process.execPath) {
+      env.ELECTRON_RUN_AS_NODE = '1';
+    }
     
     // Start Next.js production server
     frontendProcess = spawn(
@@ -124,8 +152,43 @@ function findNodeExecutable() {
   // Development: use 'node' from PATH
   if (isDev) return 'node';
   
-  // Windows: use Electron's embedded Node.js
-  if (process.platform === 'win32') return process.execPath;
+  // ─── Windows: search real Node.js paths ─────────────────────────────────
+  // NEVER return process.execPath on Windows — that's the Electron binary and
+  // spawning it re-launches the whole app, causing an infinite-window loop.
+  if (process.platform === 'win32') {
+    const winHome = process.env.USERPROFILE || process.env.HOME || '';
+    const winPaths = [
+      // NVM for Windows
+      path.join(process.env.NVM_SYMLINK || path.join(process.env.APPDATA || '', 'nvm', 'current'), 'node.exe'),
+      // Default Node.js install
+      'C:\\Program Files\\nodejs\\node.exe',
+      'C:\\Program Files (x86)\\nodejs\\node.exe',
+      // nvm-windows default
+      path.join(winHome, 'AppData', 'Roaming', 'nvm', 'current', 'node.exe'),
+      // Scoop
+      path.join(winHome, 'scoop', 'apps', 'nodejs', 'current', 'node.exe'),
+      // Volta
+      path.join(winHome, '.volta', 'bin', 'node.exe'),
+    ];
+    for (const p of winPaths) {
+      if (fs.existsSync(p)) {
+        console.log('Found node at:', p);
+        return p;
+      }
+    }
+    // Try 'where node'
+    try {
+      const whereNode = execSync('where node', { encoding: 'utf8', timeout: 5000 }).trim().split('\n')[0].trim();
+      if (whereNode && !whereNode.includes('electron') && fs.existsSync(whereNode)) {
+        console.log('Found node via where:', whereNode);
+        return whereNode;
+      }
+    } catch (e) { /* where failed */ }
+    
+    // Last resort: use Electron as Node with ELECTRON_RUN_AS_NODE
+    console.log('WARNING: No standalone Node.js found on Windows. Using Electron as Node.');
+    return process.execPath;
+  }
   
   const homeDir = process.env.HOME || require('os').homedir();
   
@@ -240,6 +303,11 @@ function startBackend() {
       LOG_PATH: logsPath,
       NODE_PATH: backendNodeModules,
     };
+
+    // If the found node is actually Electron, tell it to behave as Node
+    if (nodeExecutable === process.execPath) {
+      env.ELECTRON_RUN_AS_NODE = '1';
+    }
 
     // Spawn backend process with correct working directory
     backendProcess = spawn(nodeExecutable, [backendPath], {
@@ -356,11 +424,25 @@ function createWindow() {
   console.log('Frontend URL will be:', mainWindow.frontendUrl);
 
   // In production, don't load URL yet — wait for servers to start
-  // In dev mode, servers are already running so load immediately
+  // In dev mode, servers are already running so load with retry
   if (isDev) {
-    mainWindow.loadURL(mainWindow.frontendUrl).catch((error) => {
-      console.error('❌ Failed to load frontend:', error);
-    });
+    const loadWithRetry = async (attempts = 5) => {
+      for (let i = 1; i <= attempts; i++) {
+        try {
+          console.log(`Loading frontend (attempt ${i}/${attempts})...`);
+          await mainWindow.loadURL(mainWindow.frontendUrl);
+          console.log('✅ Frontend loaded in dev mode');
+          return;
+        } catch (error) {
+          console.error(`❌ loadURL attempt ${i} failed:`, error.message);
+          if (i < attempts) {
+            await new Promise(r => setTimeout(r, i * 1500));
+          }
+        }
+      }
+      console.error('❌ All loadURL attempts failed in dev mode');
+    };
+    loadWithRetry();
   }
   
   // Handle load failures
@@ -379,6 +461,27 @@ function createWindow() {
       path.join(logsPath, 'window-load.log'),
       `${new Date().toISOString()} - Frontend loaded successfully\n`
     );
+  });
+
+  // Handle renderer process crash — auto-reload the page
+  let rendererCrashCount = 0;
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    console.error(`💥 Renderer crashed: reason=${details.reason}, exitCode=${details.exitCode}`);
+    fs.appendFileSync(
+      path.join(logsPath, 'window-load.log'),
+      `${new Date().toISOString()} - Renderer crashed: reason=${details.reason} exitCode=${details.exitCode}\n`
+    );
+    rendererCrashCount++;
+    if (rendererCrashCount <= 3 && mainWindow && !mainWindow.isDestroyed()) {
+      console.log(`🔄 Auto-reloading after renderer crash (attempt ${rendererCrashCount}/3)...`);
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL(mainWindow.frontendUrl).catch(err => {
+            console.error('❌ Reload after crash failed:', err.message);
+          });
+        }
+      }, 1000);
+    }
   });
 
   // Don't load URL here - will load after servers are ready
@@ -495,6 +598,14 @@ app.whenReady().then(async () => {
   console.log('Starting StockYard...');
   console.log('Mode:', isDev ? 'Development' : 'Production');
 
+  // Focus existing window when a second instance tries to launch
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
   // Create window FIRST so it's always visible
   createWindow();
   console.log('✅ Main window created');
@@ -556,12 +667,33 @@ app.whenReady().then(async () => {
         await startFrontend();
         console.log('✅ Frontend started successfully');
         
-        // Servers are ready - NOW load the frontend URL
+        // Servers are ready - NOW load the frontend URL with retry logic
         console.log('✅ All servers initialized, loading frontend...');
         if (mainWindow) {
-          mainWindow.loadURL(mainWindow.frontendUrl).catch((err) => {
-            console.error('❌ Failed to load frontend after server start:', err);
-          });
+          const maxRetries = 5;
+          let attempt = 0;
+          const tryLoadURL = async () => {
+            attempt++;
+            try {
+              console.log(`Loading frontend URL (attempt ${attempt}/${maxRetries})...`);
+              await mainWindow.loadURL(mainWindow.frontendUrl);
+              console.log('✅ Frontend URL loaded successfully');
+            } catch (err) {
+              console.error(`❌ loadURL attempt ${attempt} failed:`, err.message);
+              if (attempt < maxRetries) {
+                const delay = attempt * 2000; // 2s, 4s, 6s, 8s
+                console.log(`Retrying in ${delay / 1000}s...`);
+                await new Promise(r => setTimeout(r, delay));
+                await tryLoadURL();
+              } else {
+                console.error('❌ All loadURL attempts failed. Showing error page.');
+                mainWindow.webContents.executeJavaScript(`
+                  document.body.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: system-ui; background: #1e293b; color: white; flex-direction: column; padding: 2rem; text-align: center;"><h1 style="color: #ef4444; margin-bottom: 1rem;">Failed to Load Application</h1><p>Could not connect to the frontend server after ${maxRetries} attempts.</p><p style="color: #94a3b8; margin-top: 1rem;">Try restarting the application.</p><button onclick="require(\\'electron\\').ipcRenderer.send(\\'restart-app\\')" style="margin-top: 2rem; padding: 0.75rem 2rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">Restart</button></div>';
+                `);
+              }
+            }
+          };
+          await tryLoadURL();
         }
       } catch (error) {
         console.error('❌ Backend startup failed:', error.message);

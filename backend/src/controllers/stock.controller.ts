@@ -135,14 +135,6 @@ export class StockController {
         return { movement, updatedItem };
       });
 
-      // Emit real-time update
-      const io = req.app.get('io');
-      io.emit('stock:updated', {
-        type: 'stock_in',
-        itemId: validatedData.itemId,
-        quantity: result.updatedItem.currentQuantity.toString(),
-      });
-
       res.status(201).json({
         status: 'success',
         message: 'Stock added successfully',
@@ -279,24 +271,6 @@ export class StockController {
         return { movement, updatedItem };
       });
 
-      // Emit real-time update
-      const io = req.app.get('io');
-      io.emit('stock:updated', {
-        type: 'stock_out',
-        itemId: validatedData.itemId,
-        quantity: result.updatedItem.currentQuantity.toString(),
-      });
-
-      // Emit low stock alert for real-time monitoring
-      if (result.updatedItem.currentQuantity.lte(item.minStockLevel)) {
-        io.emit('low_stock_alert', {
-          itemId: item.id,
-          itemName: item.name,
-          currentQuantity: result.updatedItem.currentQuantity.toString(),
-          minStockLevel: item.minStockLevel.toString(),
-        });
-      }
-
       res.status(201).json({
         status: 'success',
         message: 'Stock removed successfully',
@@ -394,13 +368,6 @@ export class StockController {
         });
 
         return { movement, updatedItem };
-      });
-
-      const io = req.app.get('io');
-      io.emit('stock:updated', {
-        type: 'adjustment',
-        itemId: validatedData.itemId,
-        quantity: result.updatedItem.currentQuantity.toString(),
       });
 
       res.status(201).json({

@@ -178,19 +178,13 @@ export default function ScanPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="mb-6">
-          <BackButton fallbackRoute="/dashboard" className="mb-4" />
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`p-3 rounded-lg ${scanMode === 'in' ? 'bg-green-50' : 'bg-red-50'}`}>
-                {scanMode === 'in' ? (
-                  <PackagePlus className="w-8 h-8 text-green-600" />
-                ) : (
-                  <PackageMinus className="w-8 h-8 text-red-600" />
-                )}
-              </div>
+    <div className="min-h-screen bg-white">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="space-y-4">
+            <BackButton fallbackRoute="/dashboard" />
+            <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">
                   Scan {scanMode === 'in' ? 'In' : 'Out'}
@@ -204,9 +198,11 @@ export default function ScanPage() {
             </div>
           </div>
         </div>
+      </header>
 
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Scan Mode Toggle */}
-        <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
+        <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-3">
             Scan Mode
           </label>
@@ -237,7 +233,7 @@ export default function ScanPage() {
         </div>
 
         {/* Quantity Selection */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+        <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-3">
             Quantity per Scan
           </label>
@@ -247,14 +243,14 @@ export default function ScanPage() {
               value={quantity}
               onChange={(e) => setQuantity(Number(e.target.value) || 1)}
               min="1"
-              className="w-32 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              className="w-32 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <span className="text-sm text-gray-600">unit(s) will be added for each scanned item</span>
           </div>
         </div>
 
         {/* Barcode Input (for physical scanner or manual entry) */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+        <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
           <form onSubmit={handleBarcodeSubmit}>
             <label className="block text-sm font-medium text-gray-700 mb-3">
               Scan or Enter Barcode
@@ -268,7 +264,7 @@ export default function ScanPage() {
                   value={barcodeInput}
                   onChange={handleBarcodeInputChange}
                   placeholder="Focus here and scan with your device..."
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   autoFocus
                 />
               </div>
@@ -282,7 +278,7 @@ export default function ScanPage() {
               </button>
             </div>
             <p className="mt-2 text-sm text-gray-500">
-              💡 Tip: Keep this field focused. Your barcode scanner will automatically type here.
+              Tip: Keep this field focused. Your barcode scanner will automatically type here.
             </p>
           </form>
         </div>
@@ -290,16 +286,16 @@ export default function ScanPage() {
         {/* Camera Scanner Button (Alternative) */}
         <button
           onClick={() => setShowScanner(true)}
-          className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-4 px-4 rounded-xl transition-colors flex items-center justify-center gap-3 mb-6"
+          className="w-full bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium py-4 px-4 rounded-lg transition-colors flex items-center justify-center gap-3 mb-6"
         >
-          <Camera className="h-6 w-6" />
+          <Camera className="h-5 w-5" />
           <span>Or Use Camera Scanner</span>
         </button>
 
         {/* Recent Scans */}
         {recentScans.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
               Recent Scans
             </h2>
             <div className="space-y-3">
@@ -320,9 +316,9 @@ export default function ScanPage() {
         )}
 
         {/* Instructions */}
-        <div className="bg-green-50 border border-green-200 rounded-xl p-6">
-          <h3 className="font-semibold text-green-900 mb-2">How It Works</h3>
-          <ul className="space-y-2 text-sm text-green-800">
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <h3 className="font-semibold text-gray-900 mb-2">How It Works</h3>
+          <ul className="space-y-2 text-sm text-gray-600">
             <li>• Set the quantity you want to add per scan (default: 1)</li>
             <li>• Scan a barcode or enter it manually</li>
             <li>• Stock is updated immediately - no confirmation needed</li>

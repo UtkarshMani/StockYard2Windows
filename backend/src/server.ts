@@ -2,8 +2,6 @@ import express, { Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.routes';
 import userRoutes from './routes/user.routes';
@@ -46,16 +44,7 @@ async function startServer() {
     logger.info(`💾 Using database: ${getDatabasePath()}`);
 
     const app: Application = express();
-    const httpServer = createServer(app);
     const isEmbeddedMode = process.env.EMBEDDED_MODE === 'true';
-
-    // Socket.IO configuration - more permissive for desktop app
-    const io = new Server(httpServer, {
-      cors: {
-        origin: isEmbeddedMode ? '*' : (process.env.CORS_ORIGIN || 'http://localhost:3000'),
-        credentials: true,
-      },
-    });
 
     // Middleware
     app.use(helmet({
@@ -106,21 +95,9 @@ app.use((_req, res) => {
 // Error handling middleware
 app.use(errorHandler);
 
-// Socket.IO connection
-io.on('connection', (socket) => {
-  logger.info(`Client connected: ${socket.id}`);
-
-  socket.on('disconnect', () => {
-    logger.info(`Client disconnected: ${socket.id}`);
-  });
-});
-
-    // Make io accessible to routes
-    app.set('io', io);
-
     const PORT = process.env.PORT || 5000;
 
-    httpServer.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       logger.info(`✅ Server running on port ${PORT}`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
       logger.info(`API Docs: http://localhost:${PORT}/api-docs`);
@@ -136,13 +113,13 @@ io.on('connection', (socket) => {
     // Graceful shutdown
     process.on('SIGTERM', () => {
       logger.info('SIGTERM received, closing server gracefully');
-      httpServer.close(() => {
+      server.close(() => {
         logger.info('Server closed');
         process.exit(0);
       });
     });
 
-    return { app, io, httpServer };
+    return { app, server };
     
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
