@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 const isDev = !app.isPackaged; // Detect if running in development or packaged
@@ -397,6 +397,79 @@ function createWindow() {
 }
 
 /**
+ * Kill any process occupying a given port
+ */
+function killProcessOnPort(port) {
+  try {
+    if (process.platform === 'win32') {
+      const result = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, { encoding: 'utf8', timeout: 5000 });
+      const lines = result.trim().split('\n');
+      for (const line of lines) {
+        const pid = line.trim().split(/\s+/).pop();
+        if (pid && pid !== '0') {
+          try { execSync(`taskkill /PID ${pid} /F`, { timeout: 5000 }); } catch (e) { /* ignore */ }
+        }
+      }
+    } else {
+      // Try fuser first (most reliable, uses full path for desktop launcher compatibility)
+      try {
+        execSync(`/usr/bin/fuser -k ${port}/tcp`, { timeout: 5000, stdio: 'ignore' });
+        console.log(`Killed process on port ${port} via fuser`);
+        return;
+      } catch (e) { /* fuser not available or no process */ }
+
+      // Fallback to lsof with full path
+      try {
+        const result = execSync(`/usr/bin/lsof -ti:${port}`, { encoding: 'utf8', timeout: 5000 }).trim();
+        if (result) {
+          const pids = result.split('\n');
+          for (const pid of pids) {
+            if (pid) {
+              try { process.kill(parseInt(pid), 'SIGKILL'); } catch (e) { /* ignore */ }
+            }
+          }
+          console.log(`Killed process on port ${port} via lsof`);
+          return;
+        }
+      } catch (e) { /* lsof not available or no process */ }
+
+      // Last resort: scan /proc/net/tcp for the port
+      try {
+        const hexPort = port.toString(16).toUpperCase().padStart(4, '0');
+        const tcp = fs.readFileSync('/proc/net/tcp', 'utf8');
+        const tcp6 = fs.readFileSync('/proc/net/tcp6', 'utf8');
+        const allLines = (tcp + '\n' + tcp6).split('\n');
+        for (const line of allLines) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length > 7 && parts[1] && parts[1].endsWith(':' + hexPort) && parts[3] === '0A') {
+            const inode = parts[9];
+            // Find PID by scanning /proc/*/fd/
+            const procDirs = fs.readdirSync('/proc').filter(d => /^\d+$/.test(d));
+            for (const pidDir of procDirs) {
+              try {
+                const fds = fs.readdirSync(`/proc/${pidDir}/fd`);
+                for (const fd of fds) {
+                  try {
+                    const link = fs.readlinkSync(`/proc/${pidDir}/fd/${fd}`);
+                    if (link.includes(`socket:[${inode}]`)) {
+                      process.kill(parseInt(pidDir), 'SIGKILL');
+                      console.log(`Killed PID ${pidDir} on port ${port} via /proc scan`);
+                    }
+                  } catch (e) { /* permission denied */ }
+                }
+              } catch (e) { /* permission denied */ }
+            }
+          }
+        }
+      } catch (e) { /* /proc scan failed */ }
+    }
+    console.log(`Port ${port} cleared`);
+  } catch (e) {
+    console.log(`Port ${port} check: no process found or already free`);
+  }
+}
+
+/**
  * Check if server is already running
  */
 function checkServerRunning(port) {
@@ -421,6 +494,11 @@ app.whenReady().then(async () => {
   // Create window FIRST so it's always visible
   createWindow();
   console.log('✅ Main window created');
+
+  // Load a blank page so executeJavaScript works for error messages
+  if (!isDev) {
+    mainWindow.loadURL('data:text/html,<html><body style="background:#1e293b;"></body></html>');
+  }
 
   try {
     // Check if servers are already running
@@ -452,6 +530,13 @@ app.whenReady().then(async () => {
       
       console.log('✓ Backend and Frontend servers detected');
     } else {
+      // Kill zombie processes on our ports before starting servers
+      console.log('🧹 Clearing ports...');
+      killProcessOnPort(BACKEND_PORT);
+      killProcessOnPort(FRONTEND_PORT);
+      // Give OS a moment to release the ports
+      await new Promise(r => setTimeout(r, 1500));
+
       // Start embedded backend server
       console.log('🚀 Starting embedded backend server...');
       console.log('📂 Data directory:', dataDir);
