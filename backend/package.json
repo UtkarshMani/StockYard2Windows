@@ -16,9 +16,6 @@
     "db:seed:production": "tsx prisma/seed-production.ts",
     "db:backup": "tsx scripts/backup-db.ts",
     "db:restore": "tsx scripts/restore-db.ts",
-    "db:cleanup": "tsx scripts/production-cleanup.ts",
-    "test:deletions": "tsx scripts/test-deletions.ts",
-    "production:prepare": "npm run db:cleanup && npm run build",
     "prisma:generate": "prisma generate",
     "lint": "eslint . --ext .ts",
     "test": "jest"

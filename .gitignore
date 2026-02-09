@@ -78,6 +78,7 @@ build/*.icns
 data/
 user-data/
 Gate Passes/
+Barcode/
 
 # Backups
 *.backup
