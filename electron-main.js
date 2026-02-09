@@ -123,15 +123,44 @@ function findNodeExecutable() {
   // Windows: use Electron's embedded Node.js
   if (process.platform === 'win32') return process.execPath;
   
-  // Linux/macOS: Try to find system node
+  const homeDir = process.env.HOME || require('os').homedir();
+  
+  // 1. Scan NVM directory for any installed node version (desktop launchers don't have NVM in PATH)
+  const nvmDir = path.join(homeDir, '.nvm', 'versions', 'node');
+  if (fs.existsSync(nvmDir)) {
+    try {
+      const versions = fs.readdirSync(nvmDir)
+        .filter(v => v.startsWith('v'))
+        .sort((a, b) => {
+          // Sort by version number descending (latest first)
+          const partsA = a.replace('v', '').split('.').map(Number);
+          const partsB = b.replace('v', '').split('.').map(Number);
+          for (let i = 0; i < 3; i++) {
+            if ((partsA[i] || 0) !== (partsB[i] || 0)) return (partsB[i] || 0) - (partsA[i] || 0);
+          }
+          return 0;
+        });
+      for (const ver of versions) {
+        const nodePath = path.join(nvmDir, ver, 'bin', 'node');
+        if (fs.existsSync(nodePath)) {
+          console.log('Found node via NVM:', nodePath);
+          return nodePath;
+        }
+      }
+    } catch (e) {
+      console.log('NVM scan failed:', e.message);
+    }
+  }
+  
+  // 2. Check common system paths
   const commonPaths = [
     '/usr/bin/node',
     '/usr/local/bin/node',
     '/bin/node',
-    process.env.HOME + '/.nvm/versions/node/' + process.version.replace('v', '') + '/bin/node',
+    path.join(homeDir, '.local', 'bin', 'node'),
+    '/snap/node/current/bin/node',
   ];
   
-  // Check common paths
   for (const nodePath of commonPaths) {
     if (fs.existsSync(nodePath)) {
       console.log('Found node at:', nodePath);
@@ -139,7 +168,7 @@ function findNodeExecutable() {
     }
   }
   
-  // Try 'which node' command
+  // 3. Try 'which node' (works from terminal but may fail from desktop launcher)
   try {
     const whichNode = execSync('which node', { encoding: 'utf8', timeout: 5000 }).trim();
     if (whichNode && fs.existsSync(whichNode)) {
@@ -150,8 +179,8 @@ function findNodeExecutable() {
     console.log('which node failed:', e.message);
   }
   
-  // Fallback: try 'node' from PATH (might fail in desktop launcher)
-  console.log('Using fallback: node from PATH');
+  // 4. Fallback: try 'node' from PATH (might fail in desktop launcher)
+  console.log('WARNING: Using fallback: node from PATH - may not work from desktop launcher');
   return 'node';
 }
 
