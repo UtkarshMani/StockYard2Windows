@@ -427,6 +427,13 @@ function createWindow() {
   // In dev mode, servers are already running so load with retry
   if (isDev) {
     const loadWithRetry = async (attempts = 5) => {
+      // Clear Electron's HTTP cache so it always loads the latest code from the dev server
+      try {
+        await mainWindow.webContents.session.clearCache();
+        console.log('🧹 Cleared Electron session cache');
+      } catch (e) {
+        console.log('Cache clear failed (non-fatal):', e.message);
+      }
       for (let i = 1; i <= attempts; i++) {
         try {
           console.log(`Loading frontend (attempt ${i}/${attempts})...`);

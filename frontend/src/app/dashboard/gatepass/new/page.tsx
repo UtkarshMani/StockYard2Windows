@@ -66,6 +66,7 @@ export default function NewGatePassPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [scanQuantity, setScanQuantity] = useState(1);
   const [scanningEnabled, setScanningEnabled] = useState(false);
   const [scannedItemIds, setScannedItemIds] = useState<Set<string>>(new Set());
   const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
@@ -368,9 +369,9 @@ export default function NewGatePassPage() {
       );
 
       if (existingItemIndex !== -1) {
-        // Item exists, increment quantity
+        // Item exists, increment quantity by scanQuantity
         const currentItem = watchedItems[existingItemIndex];
-        const newQuantity = Number(currentItem.quantity) + 1;
+        const newQuantity = Number(currentItem.quantity) + scanQuantity;
         const price = Number(currentItem.unitPrice) || sellingPrice;
         
         // Check stock before updating
@@ -391,9 +392,9 @@ export default function NewGatePassPage() {
         toast.success(`${scannedItem.name} quantity increased to ${newQuantity}`);
       } else {
         // Check stock before adding new item
-        const stockCheck = await checkStockAvailability(scannedItem.id, 1);
+        const stockCheck = await checkStockAvailability(scannedItem.id, scanQuantity);
         if (!stockCheck.available) {
-          toast.error(`Item out of stock! Available: ${stockCheck.currentStock}`);
+          toast.error(`Insufficient stock! Available: ${stockCheck.currentStock}, Requested: ${scanQuantity}`);
           setBarcodeInput('');
           return;
         }
@@ -401,11 +402,12 @@ export default function NewGatePassPage() {
         // New item, add to gate pass
         const newItem = {
           itemId: scannedItem.id,
-          quantity: 1,
+          quantity: scanQuantity,
           unitPrice: sellingPrice,
         };
         
         console.log('Adding new item to gate pass:', scannedItem.name, newItem);
+        append(newItem);
         // Track this item as scanned
         setScannedItemIds(prev => new Set(prev).add(scannedItem.id));
         toast.success(`${scannedItem.name} added to gate pass`);
@@ -551,6 +553,23 @@ export default function NewGatePassPage() {
             {scanningEnabled && (
               <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <form onSubmit={handleBarcodeSubmit} className="space-y-3">
+                  {/* Quantity per Scan */}
+                  <div>
+                    <label className="block text-sm font-medium text-blue-900 mb-2">
+                      Quantity per Scan
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        value={scanQuantity}
+                        onChange={(e) => setScanQuantity(Math.max(1, Number(e.target.value) || 1))}
+                        min="1"
+                        className="w-28 px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <span className="text-sm text-blue-700">unit(s) per scanned item</span>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium text-blue-900 mb-2">
                       Scan or Enter Barcode

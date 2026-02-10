@@ -32,39 +32,80 @@ export async function runMigrations(): Promise<{ success: boolean; isFirstRun: b
   } else {
     logger.info('📊 Existing database found');
     
-    if (!isEmbedded) {
-      // Only backup and migrate in development mode
-      await backupDatabase(dbPath);
-    }
+    // Backup before any migration (both dev and production)
+    await backupDatabase(dbPath);
   }
 
   try {
     // Ensure DATABASE_URL is set correctly
     process.env.DATABASE_URL = `file:${dbPath}`;
     
-    if (!isEmbedded) {
-      // Only run Prisma CLI in development mode
-      const migrationsDir = path.join(__dirname, '..', '..', 'prisma', 'migrations');
-      
-      if (fs.existsSync(migrationsDir)) {
-        logger.info('Running database migrations...');
-        execSync('npx prisma migrate deploy', {
-          cwd: path.join(__dirname, '..', '..'),
-          env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
-          stdio: 'inherit'
-        });
+    // Resolve backend directory for both dev and production
+    let backendDir: string;
+    if (isEmbedded && (process as any).resourcesPath) {
+      backendDir = path.join((process as any).resourcesPath, 'backend');
+    } else {
+      backendDir = path.join(__dirname, '..', '..');
+    }
+
+    const migrationsDir = path.join(backendDir, 'prisma', 'migrations');
+
+    if (fs.existsSync(migrationsDir)) {
+      logger.info('Running database migrations...');
+
+      if (isEmbedded) {
+        // In production: use spawnSync with explicit node + prisma paths
+        const nodeExecutable = process.argv[0] || 'node';
+        const prismaCliJs = path.join(backendDir, 'node_modules', 'prisma', 'build', 'index.js');
+
+        let migrateResult: ReturnType<typeof spawnSync>;
+        if (fs.existsSync(prismaCliJs)) {
+          logger.info(`Using Prisma CLI at: ${prismaCliJs}`);
+          migrateResult = spawnSync(nodeExecutable, [prismaCliJs, 'migrate', 'deploy'], {
+            cwd: backendDir,
+            env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
+            stdio: 'pipe'
+          });
+        } else {
+          // Fallback: use shell
+          const shell = fs.existsSync('/usr/bin/bash') ? '/usr/bin/bash' :
+                         fs.existsSync('/bin/bash') ? '/bin/bash' :
+                         fs.existsSync('/usr/bin/sh') ? '/usr/bin/sh' : '/bin/sh';
+          migrateResult = spawnSync(shell, ['-c', 'npx prisma migrate deploy'], {
+            cwd: backendDir,
+            env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
+            stdio: 'pipe'
+          });
+        }
+
+        const stdout = migrateResult.stdout?.toString() || '';
+        const stderr = migrateResult.stderr?.toString() || '';
+        if (stdout) logger.info(`[migrate] ${stdout.trim()}`);
+        if (stderr) logger.warn(`[migrate stderr] ${stderr.trim()}`);
+
+        if (migrateResult.status !== 0) {
+          logger.error(`Prisma migrate deploy failed (exit ${migrateResult.status})`);
+          throw new Error(`Prisma migrate deploy failed: ${stderr || stdout}`);
+        }
       } else {
-        // If no migrations folder, just push the schema
-        logger.info('Pushing database schema...');
-        execSync('npx prisma db push --accept-data-loss', {
-          cwd: path.join(__dirname, '..', '..'),
+        // In development: use execSync (npx is on PATH)
+        execSync('npx prisma migrate deploy', {
+          cwd: backendDir,
           env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
           stdio: 'inherit'
         });
       }
+    } else if (!isEmbedded) {
+      // No migrations folder — only push schema in dev mode
+      logger.info('Pushing database schema...');
+      execSync('npx prisma db push --accept-data-loss', {
+        cwd: path.join(__dirname, '..', '..'),
+        env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
+        stdio: 'inherit'
+      });
     } else {
-      // In embedded mode, just verify database connection
-      logger.info('Verifying database connection...');
+      // Embedded mode with no migrations folder — verify connection only
+      logger.info('No migrations found, verifying database connection...');
       await prisma.$connect();
       await prisma.$disconnect();
     }
@@ -75,8 +116,8 @@ export async function runMigrations(): Promise<{ success: boolean; isFirstRun: b
   } catch (error) {
     logger.error('❌ Database setup failed:', error);
     
-    // Restore backup on failure (only in dev mode)
-    if (!isFirstRun && !isEmbedded) {
+    // Restore backup on failure
+    if (!isFirstRun) {
       await restoreBackup(dbPath);
     }
     
@@ -110,23 +151,34 @@ async function setupProductionDatabase(dbPath: string): Promise<{ success: boole
       fs.copyFileSync(seedDbPath, dbPath);
       logger.info('✅ Database copied successfully');
     } else {
-      // Create empty database and run initial setup using Prisma Client
+      // Create empty database and run initial setup using migrations
       logger.info('🔨 Creating new database...');
       
       // Set DATABASE_URL for Prisma Client
       process.env.DATABASE_URL = `file:${dbPath}`;
       
-      // Push schema to create tables in production
-      logger.info('📋 Pushing database schema...');
+      // Run migrations to create tables (preserves migration history for future updates)
+      logger.info('📋 Running initial database migrations...');
       
       // Find node executable for spawning prisma CLI
       const nodeExecutable = process.argv[0] || 'node';
 
       // Use spawnSync with explicit node and prisma paths to avoid shell issues
       const prismaCliJs = path.join(backendDir, 'node_modules', 'prisma', 'build', 'index.js');
+      const migrationsDir = path.join(backendDir, 'prisma', 'migrations');
+      
       let pushResult: ReturnType<typeof spawnSync>;
-      if (fs.existsSync(prismaCliJs)) {
+
+      // Prefer migrate deploy if migrations exist (tracks migration history)
+      if (fs.existsSync(migrationsDir) && fs.existsSync(prismaCliJs)) {
         logger.info(`Using Prisma CLI at: ${prismaCliJs}`);
+        pushResult = spawnSync(nodeExecutable, [prismaCliJs, 'migrate', 'deploy'], {
+          cwd: backendDir,
+          env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
+          stdio: 'pipe'
+        });
+      } else if (fs.existsSync(prismaCliJs)) {
+        logger.info(`Using Prisma CLI at: ${prismaCliJs} (db push fallback)`);
         pushResult = spawnSync(nodeExecutable, [prismaCliJs, 'db', 'push', '--accept-data-loss', '--skip-generate'], {
           cwd: backendDir,
           env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
