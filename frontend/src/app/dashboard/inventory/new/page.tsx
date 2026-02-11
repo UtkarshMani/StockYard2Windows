@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -46,6 +46,8 @@ interface Category {
 
 export default function NewItemPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const prefillBarcode = searchParams.get('barcode') || '';
   const [isLoading, setIsLoading] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
@@ -57,14 +59,23 @@ export default function NewItemPage() {
     formState: { errors },
     reset,
     watch,
+    setValue,
   } = useForm<ItemFormData>({
     resolver: zodResolver(itemSchema),
     defaultValues: {
+      barcode: prefillBarcode,
       currentQuantity: 0,
       minStockLevel: 0,
       unitOfMeasurement: 'pcs',
     },
   });
+
+  // Pre-fill barcode from URL query param (e.g. redirected from scan page)
+  useEffect(() => {
+    if (prefillBarcode) {
+      setValue('barcode', prefillBarcode);
+    }
+  }, [prefillBarcode, setValue]);
 
   // Watch the categoryId field to get its current value
   const selectedCategoryId = watch('categoryId') || '';

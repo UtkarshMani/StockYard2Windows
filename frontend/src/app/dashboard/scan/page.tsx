@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { BarcodeScanner } from '@/components/barcode-scanner';
 import BackButton from '@/components/back-button';
 import { Camera, Search, ScanLine, PackagePlus, PackageMinus, Plus, X } from 'lucide-react';
@@ -25,7 +24,6 @@ interface Item {
 }
 
 export default function ScanPage() {
-  const router = useRouter();
   const [showScanner, setShowScanner] = useState(false);
   const [scanMode, setScanMode] = useState<ScanMode>('in');
   const [quantity, setQuantity] = useState(1);
@@ -33,8 +31,8 @@ export default function ScanPage() {
   const [barcodeInput, setBarcodeInput] = useState('');
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const [recentScans, setRecentScans] = useState<any[]>([]);
-  
-  // Unknown barcode handling
+
+  // Unknown barcode modal
   const [showNewItemModal, setShowNewItemModal] = useState(false);
   const [scannedUnknownBarcode, setScannedUnknownBarcode] = useState('');
   const [categories, setCategories] = useState<any[]>([]);
@@ -64,6 +62,7 @@ export default function ScanPage() {
   const handleScan = async (barcode: string) => {
     setShowScanner(false);
     setIsLoading(true);
+    let itemNotFound = false;
 
     try {
       // Try to find the item by barcode
@@ -109,6 +108,7 @@ export default function ScanPage() {
     } catch (error: any) {
       // Handle unknown barcode (404 error)
       if (error.response?.status === 404) {
+        itemNotFound = true;
         setScannedUnknownBarcode(barcode);
         setShowNewItemModal(true);
         toast.error(`Unknown barcode: ${barcode}`);
@@ -119,48 +119,85 @@ export default function ScanPage() {
     } finally {
       setIsLoading(false);
       setBarcodeInput('');
-      barcodeInputRef.current?.focus();
+      // Don't re-focus input after item-not-found to prevent
+      // the physical scanner's next scan from triggering actions
+      if (!itemNotFound) {
+        barcodeInputRef.current?.focus();
+      } else {
+        // Blur the input so scanner buffer is ignored
+        barcodeInputRef.current?.blur();
+      }
     }
   };
 
-  const handleCreateNewItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      // Create new item with scanned barcode
-      const response = await api.post('/items', {
-        barcode: scannedUnknownBarcode,
-        name: newItemForm.name,
-        description: newItemForm.description,
-        categoryId: newItemForm.categoryId || undefined,
-        unitOfMeasurement: newItemForm.unitOfMeasurement,
-        currentQuantity: newItemForm.initialQuantity,
-        minStockLevel: 0,
-      });
+  const handleCreateNewItem = () => {
+    // Require name to be filled
+    if (!newItemForm.name.trim()) {
+      toast.error('Please enter an item name');
+      return;
+    }
 
-      const newItem = response.data.data.item;
-      toast.success(`New item created: ${newItem.name}`);
-      
-      // Close modal and reset
-      setShowNewItemModal(false);
-      setScannedUnknownBarcode('');
-      setNewItemForm({
-        name: '',
-        categoryId: '',
-        description: '',
-        unitOfMeasurement: 'pcs',
-        initialQuantity: 0,
-      });
+    const createItem = async () => {
+      try {
+        const response = await api.post('/items', {
+          barcode: scannedUnknownBarcode,
+          name: newItemForm.name,
+          description: newItemForm.description || undefined,
+          categoryId: newItemForm.categoryId || undefined,
+          unitOfMeasurement: newItemForm.unitOfMeasurement,
+          currentQuantity: newItemForm.initialQuantity,
+          minStockLevel: 0,
+        });
 
-      // Add to recent scans
-      setRecentScans(prev => [{
-        ...newItem,
-        scannedQuantity: newItemForm.initialQuantity,
-        scannedMode: 'new',
-        scannedAt: new Date().toLocaleTimeString(),
-      }, ...prev.slice(0, 9)]);
-      
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to create item');
+        const newItem = response.data.data.item;
+        toast.success(`New item created: ${newItem.name}`);
+
+        // Close modal and reset
+        setShowNewItemModal(false);
+        setScannedUnknownBarcode('');
+        setNewItemForm({
+          name: '',
+          categoryId: '',
+          description: '',
+          unitOfMeasurement: 'pcs',
+          initialQuantity: 0,
+        });
+
+        // Add to recent scans
+        setRecentScans(prev => [{
+          ...newItem,
+          scannedQuantity: newItemForm.initialQuantity,
+          scannedMode: 'new',
+          scannedAt: new Date().toLocaleTimeString(),
+        }, ...prev.slice(0, 9)]);
+
+        // Re-focus barcode input for next scan
+        barcodeInputRef.current?.focus();
+      } catch (error: any) {
+        toast.error(error.response?.data?.message || 'Failed to create item');
+      }
+    };
+
+    createItem();
+  };
+
+  const closeNewItemModal = () => {
+    setShowNewItemModal(false);
+    setScannedUnknownBarcode('');
+    setNewItemForm({
+      name: '',
+      categoryId: '',
+      description: '',
+      unitOfMeasurement: 'pcs',
+      initialQuantity: 0,
+    });
+    barcodeInputRef.current?.focus();
+  };
+
+  // Block Enter key inside the new-item modal to prevent scanner auto-submit
+  const blockEnterKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
     }
   };
 
@@ -336,10 +373,10 @@ export default function ScanPage() {
         />
       )}
 
-      {/* New Item Modal */}
+      {/* New Item Modal — Enter key is blocked so physical scanner cannot auto-submit */}
       {showNewItemModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full p-6">
+          <div className="bg-white rounded-lg max-w-2xl w-full p-6" onKeyDown={blockEnterKey}>
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-xl font-bold text-gray-900">Unknown Barcode</h2>
@@ -348,17 +385,14 @@ export default function ScanPage() {
                 </p>
               </div>
               <button
-                onClick={() => {
-                  setShowNewItemModal(false);
-                  setScannedUnknownBarcode('');
-                }}
+                onClick={closeNewItemModal}
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateNewItem} className="space-y-4">
+            <div className="space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
                 <p className="text-sm text-blue-900">
                   <strong>What to do?</strong><br />
@@ -377,12 +411,10 @@ export default function ScanPage() {
                   </label>
                   <input
                     type="text"
-                    required
                     value={newItemForm.name}
                     onChange={(e) => setNewItemForm({ ...newItemForm, name: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="e.g., 2.5mm Copper Wire"
-                    autoFocus
                   />
                 </div>
 
@@ -453,23 +485,21 @@ export default function ScanPage() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowNewItemModal(false);
-                    setScannedUnknownBarcode('');
-                  }}
+                  onClick={closeNewItemModal}
                   className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleCreateNewItem}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
                 >
                   <Plus className="h-4 w-4" />
                   Create New Item
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
