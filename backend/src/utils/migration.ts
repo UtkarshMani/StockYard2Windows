@@ -51,6 +51,11 @@ export async function runMigrations(): Promise<{ success: boolean; isFirstRun: b
     const migrationsDir = path.join(backendDir, 'prisma', 'migrations');
 
     if (fs.existsSync(migrationsDir)) {
+      // Check if database needs baselining (existing DB created with db push, no migration history)
+      if (!isFirstRun) {
+        await baselineIfNeeded(dbPath, backendDir);
+      }
+
       logger.info('Running database migrations...');
 
       if (isEmbedded) {
@@ -122,6 +127,84 @@ export async function runMigrations(): Promise<{ success: boolean; isFirstRun: b
     }
     
     throw error;
+  }
+}
+
+/**
+ * Baseline an existing database that was created with `db push` (no migration history).
+ * Creates the _prisma_migrations table and marks all existing migrations as already applied.
+ * This allows future `migrate deploy` calls to work correctly on updates.
+ */
+async function baselineIfNeeded(dbPath: string, backendDir: string): Promise<void> {
+  try {
+    // Check if _prisma_migrations table exists
+    const result = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='_prisma_migrations'`
+    );
+
+    if (result.length > 0) {
+      logger.info('Migration history exists, no baselining needed');
+      return;
+    }
+
+    logger.info('⚠️ Database has no migration history — baselining existing database...');
+
+    // Create the _prisma_migrations table
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+        "id"                    TEXT PRIMARY KEY NOT NULL,
+        "checksum"              TEXT NOT NULL,
+        "finished_at"           DATETIME,
+        "migration_name"        TEXT NOT NULL,
+        "logs"                  TEXT,
+        "rolled_back_at"        DATETIME,
+        "started_at"            DATETIME NOT NULL DEFAULT current_timestamp,
+        "applied_steps_count"   INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+
+    // Read all migration directories and mark them as applied
+    const migrationsDir = path.join(backendDir, 'prisma', 'migrations');
+    const migrationDirs = fs.readdirSync(migrationsDir)
+      .filter(f => {
+        const fullPath = path.join(migrationsDir, f);
+        return fs.statSync(fullPath).isDirectory() && f !== 'migration_lock.toml';
+      })
+      .sort();
+
+    for (const migrationName of migrationDirs) {
+      // Read migration SQL to compute a simple checksum
+      const sqlPath = path.join(migrationsDir, migrationName, 'migration.sql');
+      let checksum = '0000000000000000';
+      if (fs.existsSync(sqlPath)) {
+        const content = fs.readFileSync(sqlPath, 'utf8');
+        // Simple hash — sum of char codes mod hex
+        let hash = 0;
+        for (let i = 0; i < content.length; i++) {
+          hash = ((hash << 5) - hash + content.charCodeAt(i)) | 0;
+        }
+        checksum = Math.abs(hash).toString(16).padStart(16, '0').slice(0, 16);
+      }
+
+      const id = require('crypto').randomUUID();
+      const now = new Date().toISOString();
+
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "_prisma_migrations" ("id", "checksum", "migration_name", "finished_at", "started_at", "applied_steps_count")
+         VALUES (?, ?, ?, ?, ?, 1)`,
+        id, checksum, migrationName, now, now
+      );
+
+      logger.info(`  ✓ Baselined: ${migrationName}`);
+    }
+
+    logger.info(`✅ Baselined ${migrationDirs.length} migrations`);
+  } catch (error) {
+    logger.error('Baselining failed:', error);
+    // Don't throw — let migrate deploy try anyway; it may still work
+  } finally {
+    // Disconnect so migrate deploy can get an exclusive lock
+    await prisma.$disconnect();
   }
 }
 
