@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { z } from 'zod';
 import prisma from '../config/database';

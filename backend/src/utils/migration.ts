@@ -115,6 +115,16 @@ export async function runMigrations(): Promise<{ success: boolean; isFirstRun: b
       await prisma.$disconnect();
     }
     
+    // Always ensure admin user exists (handles cases where previous setup failed mid-seed)
+    try {
+      await prisma.$connect();
+      await seedProductionDatabase();
+      await prisma.$disconnect();
+    } catch (seedError) {
+      logger.warn('⚠️ Post-migration seed check failed (non-fatal):', seedError);
+      try { await prisma.$disconnect(); } catch {}
+    }
+
     logger.info('✅ Database setup completed successfully');
     
     return { success: true, isFirstRun };
@@ -321,7 +331,7 @@ async function seedProductionDatabase(): Promise<void> {
     
     if (!adminExists) {
       // Create admin user
-      const bcrypt = require('bcrypt');
+      const bcrypt = require('bcryptjs');
       const hashedPassword = await bcrypt.hash('Xtrim@Q6', 10);
       
       await prisma.user.create({
